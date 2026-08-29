@@ -28,16 +28,17 @@ button:active,.active{background:#fff5}
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <span id="levelText">Livello: 1/4</span>
+  <span id="levelText">Livello: 1/8</span>
   <span id="scoreText">Punti: 0</span>
   <span id="coinText">Monete: 0</span>
   <span id="lifeText">Vite: 3</span>
 </div>
 
 <div id="invHud" style="position:fixed;top:48px;left:14px;z-index:11;display:none;color:#fff;font-weight:900;text-shadow:0 2px 3px #000">INVINCIBILE: <span id="invTime">0.0</span>s</div>
+<div id="speedHud" style="position:fixed;top:72px;left:14px;z-index:11;display:none;color:#fff;font-weight:900;text-shadow:0 2px 3px #000">TURBO: <span id="speedTime">0.0</span>s</div>
 
 <div id="bossHud">
-  BOSS
+  <span id="bossTitle">MINIBOSS</span>
   <div id="bossBar"><div id="bossFill"></div></div>
 </div>
 
@@ -52,8 +53,8 @@ button:active,.active{background:#fff5}
 <div id="overlay">
   <div class="panel">
     <h1 id="title">MichaelBros</h1>
-    <p id="message">Quattro livelli. Nell'ultimo ti aspetta il boss finale: saltaci sopra più volte per sconfiggerlo!</p>
-    <button id="start">GIOCA</button>
+    <p id="message">Otto livelli, un miniboss in ogni livello e un MEGABOSS finale. La pasta dà invincibilità e muscoli; l'hamburger dà supervelocità per 7 secondi!</p>
+    <button id="start">GIOCA</button><br><button id="soundBtn" style="margin-top:10px;min-width:170px;font-size:17px">🔊 ATTIVA SUONO</button>
   </div>
 </div>
 
@@ -62,10 +63,12 @@ const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 const overlay=document.getElementById('overlay');
 const titleEl=document.getElementById('title'),messageEl=document.getElementById('message');
 const startBtn=document.getElementById('start');
+const soundBtn=document.getElementById('soundBtn');
 const levelText=document.getElementById('levelText'),scoreText=document.getElementById('scoreText');
 const coinText=document.getElementById('coinText'),lifeText=document.getElementById('lifeText');
 const bossHud=document.getElementById('bossHud'),bossFill=document.getElementById('bossFill');
 const invHud=document.getElementById('invHud'),invTime=document.getElementById('invTime');
+const speedHud=document.getElementById('speedHud'),speedTime=document.getElementById('speedTime'),bossTitle=document.getElementById('bossTitle');
 
 let W,H,dpr,last=0,running=false,camX=0,animTime=0;
 function resize(){
@@ -84,21 +87,77 @@ enemyFace.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXwAAAF8CAYAAADM5wD
 const keys={left:false,right:false,jump:false};
 const player={x:100,y:0,w:64,h:84,vx:0,vy:0,onGround:false,face:1,invuln:0};
 let score=0,coins=0,lives=3,currentLevel=1;
-let worldW=3600,groundY=0,platforms=[],coinObjs=[],enemies=[],boxes=[],pastaObjs=[],goal=null,boss=null;
-let pastaInvuln=0,pastaMusic=false;
+let worldW=3600,groundY=0,platforms=[],coinObjs=[],enemies=[],boxes=[],pastaObjs=[],burgerObjs=[],goal=null,boss=null;
+let pastaInvuln=0,pastaMusic=false,speedBoost=0;
 let transitionLock=false;
 
-let audioCtx=null,musicTimer=null,musicStep=0;
-function ensureAudio(){
-  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  if(audioCtx.state==='suspended') audioCtx.resume();
+let audioCtx=null,musicTimer=null,musicStep=0,soundEnabled=true,masterGain=null;
+
+function createAudio(){
+  try{
+    if(!audioCtx){
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(!AC)return false;
+      audioCtx=new AC();
+      masterGain=audioCtx.createGain();
+      masterGain.gain.value=.75;
+      masterGain.connect(audioCtx.destination);
+    }
+    return true;
+  }catch(e){
+    return false;
+  }
 }
+
+async function unlockAudio(){
+  if(!createAudio())return false;
+  try{
+    if(audioCtx.state!=='running')await audioCtx.resume();
+
+    // Safari/iPhone: play a tiny buffer inside the user gesture to fully unlock audio.
+    const buffer=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
+    const source=audioCtx.createBufferSource();
+    source.buffer=buffer;
+    source.connect(masterGain);
+    source.start(0);
+
+    return audioCtx.state==='running';
+  }catch(e){
+    return false;
+  }
+}
+
+function playToneNow(freq,dur=.08,type='square',gain=.035){
+  if(!audioCtx||audioCtx.state!=='running'||!masterGain)return;
+  try{
+    const o=audioCtx.createOscillator();
+    const g=audioCtx.createGain();
+    const now=audioCtx.currentTime;
+    o.type=type;
+    o.frequency.setValueAtTime(freq,now);
+    g.gain.setValueAtTime(Math.max(.001,gain*1.9),now);
+    g.gain.exponentialRampToValueAtTime(.001,now+dur);
+    o.connect(g);
+    g.connect(masterGain);
+    o.start(now);
+    o.stop(now+dur+.03);
+  }catch(e){}
+}
+
 function tone(freq,dur=.08,type='square',gain=.035){
-  ensureAudio();const o=audioCtx.createOscillator(),g=audioCtx.createGain();
-  o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(gain,audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+dur);
-  o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);
+  if(!soundEnabled)return;
+  if(!createAudio())return;
+
+  if(audioCtx.state==='running'){
+    playToneNow(freq,dur,type,gain);
+  }else{
+    // Useful after an interruption; normally the context is already unlocked.
+    audioCtx.resume().then(()=>{
+      if(audioCtx.state==='running')playToneNow(freq,dur,type,gain);
+    }).catch(()=>{});
+  }
 }
+
 function sfxJump(){tone(520,.08);setTimeout(()=>tone(700,.07),45)}
 function sfxCoin(){tone(880,.06);setTimeout(()=>tone(1320,.07),45)}
 function sfxStomp(){tone(180,.1,'square',.05)}
@@ -106,6 +165,7 @@ function sfxHit(){tone(110,.18,'sawtooth',.05)}
 function sfxLevel(){[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.12),i*90))}
 function sfxBossHit(){tone(130,.12,'sawtooth',.06);setTimeout(()=>tone(90,.15,'square',.04),60)}
 function sfxPasta(){[659,784,988,1319].forEach((f,i)=>setTimeout(()=>tone(f,.10,'square',.045),i*70))}
+function sfxBurger(){[440,660,880,1100].forEach((f,i)=>setTimeout(()=>tone(f,.07,'square',.04),i*45))}
 function sfxWin(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.045),i*120))}
 const themes=[
  [523,659,784,659,587,698,880,698],
@@ -114,9 +174,10 @@ const themes=[
  [392,466,523,466,349,415,494,415]
 ];
 function startMusic(){
-  stopMusic();musicStep=0;
+  stopMusic();musicStep=0;pastaMusic=false;
+  createAudio();
   const seq=themes[currentLevel-1]||themes[0];
-  const tick=()=>{if(!running)return;const n=seq[musicStep%seq.length];tone(n,.10,'square',.010);if(musicStep%2===0)tone(n/4,.12,'triangle',.008);musicStep++};
+  const tick=()=>{if(!running)return;const n=seq[musicStep%seq.length];tone(n,.10,'square',.020);if(musicStep%2===0)tone(n/4,.12,'triangle',.012);musicStep++};
   tick();musicTimer=setInterval(tick,currentLevel===4?175:150);
 }
 function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null}}
@@ -126,8 +187,8 @@ function startPastaMusic(){
   const tick=()=>{
     if(!running||pastaInvuln<=0)return;
     const n=seq[musicStep%seq.length];
-    tone(n,.085,'square',.016);
-    if(musicStep%2===0)tone(n/2,.09,'triangle',.010);
+    tone(n,.085,'square',.024);
+    if(musicStep%2===0)tone(n/2,.09,'triangle',.014);
     musicStep++;
   };
   tick();musicTimer=setInterval(tick,105);
@@ -143,54 +204,74 @@ function addGround(arr,x,w){arr.push({x,y:groundY,w,h:140})}
 function mkEnemy(x,speed=50){return {x,y:groundY-52,w:52,h:52,vx:speed,alive:true}}
 function mkCoin(x,y){return {x,y,r:11,taken:false}}
 function setHud(){
-  levelText.textContent='Livello: '+currentLevel+'/4';
+  levelText.textContent='Livello: '+currentLevel+'/8';
   scoreText.textContent='Punti: '+score;
   coinText.textContent='Monete: '+coins;
   lifeText.textContent='Vite: '+lives;
 }
 
 function buildLevel(n,resetPlayer=true){
-  groundY=H-112; platforms=[];coinObjs=[];enemies=[];boxes=[];pastaObjs=[];goal=null;boss=null;
-  pastaInvuln=0;pastaMusic=false;invHud.style.display='none';
-  bossHud.style.display='none';
-  worldW=n===4?4000:3600;
+  groundY=H-112;
+  platforms=[];coinObjs=[];enemies=[];boxes=[];pastaObjs=[];burgerObjs=[];goal=null;boss=null;
+  pastaInvuln=0;pastaMusic=false;speedBoost=0;
+  invHud.style.display='none';speedHud.style.display='none';
+  bossHud.style.display='block';
 
-  if(n===1){
-    addGround(platforms,0,650);addGround(platforms,760,430);addGround(platforms,1280,560);addGround(platforms,1940,500);addGround(platforms,2540,520);addGround(platforms,3150,450);
+  const secondLoop=n>4;
+  const variant=(n-1)%4;
+  const extra=secondLoop?280:0;
+  worldW=3800+extra;
+
+  if(variant===0){
+    addGround(platforms,0,650);addGround(platforms,760,430);addGround(platforms,1280,560);addGround(platforms,1940,500);addGround(platforms,2540,520);addGround(platforms,3150,650+extra);
     platforms.push({x:420,y:groundY-120,w:160,h:22},{x:930,y:groundY-155,w:180,h:22},{x:1460,y:groundY-115,w:160,h:22},{x:2100,y:groundY-150,w:190,h:22},{x:2740,y:groundY-120,w:200,h:22});
-    enemies=[mkEnemy(600,-45),mkEnemy(1030,-50),mkEnemy(1580,45),mkEnemy(2260,-52),mkEnemy(2860,-55)];
-    coinObjs=[mkCoin(470,groundY-170),mkCoin(530,groundY-235),mkCoin(970,groundY-205),mkCoin(1510,groundY-165),mkCoin(2150,groundY-200),mkCoin(2790,groundY-170),mkCoin(3270,groundY-75)];
-    pastaObjs=[{x:1760,y:groundY-55,r:22,taken:false}];
-  } else if(n===2){
-    addGround(platforms,0,480);addGround(platforms,600,360);addGround(platforms,1080,300);addGround(platforms,1510,420);addGround(platforms,2050,340);addGround(platforms,2510,460);addGround(platforms,3110,490);
+  } else if(variant===1){
+    addGround(platforms,0,480);addGround(platforms,600,360);addGround(platforms,1080,300);addGround(platforms,1510,420);addGround(platforms,2050,340);addGround(platforms,2510,460);addGround(platforms,3110,690+extra);
     platforms.push({x:330,y:groundY-130,w:120,h:20},{x:700,y:groundY-200,w:140,h:20},{x:1160,y:groundY-120,w:130,h:20},{x:1600,y:groundY-185,w:180,h:20},{x:2160,y:groundY-125,w:150,h:20},{x:2630,y:groundY-200,w:180,h:20},{x:3220,y:groundY-150,w:160,h:20});
-    enemies=[mkEnemy(420,-65),mkEnemy(790,60),mkEnemy(1210,-65),mkEnemy(1700,-70),mkEnemy(2240,65),mkEnemy(2730,-70),mkEnemy(3300,-65)];
-    coinObjs=[mkCoin(370,groundY-180),mkCoin(730,groundY-250),mkCoin(800,groundY-250),mkCoin(1215,groundY-170),mkCoin(1660,groundY-235),mkCoin(2200,groundY-175),mkCoin(2680,groundY-250),mkCoin(3260,groundY-200),mkCoin(3420,groundY-90)];
-    pastaObjs=[{x:1880,y:groundY-55,r:22,taken:false}];
-  } else if(n===3){
-    addGround(platforms,0,400);addGround(platforms,530,320);addGround(platforms,1000,360);addGround(platforms,1530,300);addGround(platforms,1980,370);addGround(platforms,2510,330);addGround(platforms,3000,600);
+  } else if(variant===2){
+    addGround(platforms,0,400);addGround(platforms,530,320);addGround(platforms,1000,360);addGround(platforms,1530,300);addGround(platforms,1980,370);addGround(platforms,2510,330);addGround(platforms,3000,800+extra);
     platforms.push({x:270,y:groundY-170,w:120,h:20},{x:610,y:groundY-250,w:130,h:20},{x:1060,y:groundY-190,w:140,h:20},{x:1580,y:groundY-260,w:150,h:20},{x:2030,y:groundY-185,w:170,h:20},{x:2560,y:groundY-255,w:150,h:20},{x:3070,y:groundY-190,w:170,h:20});
-    enemies=[mkEnemy(340,-75),mkEnemy(650,72),mkEnemy(1110,-78),mkEnemy(1640,75),mkEnemy(2110,-80),mkEnemy(2620,78),mkEnemy(3190,-80),mkEnemy(3380,75)];
-    coinObjs=[mkCoin(310,groundY-220),mkCoin(650,groundY-300),mkCoin(715,groundY-300),mkCoin(1100,groundY-240),mkCoin(1630,groundY-310),mkCoin(2090,groundY-235),mkCoin(2600,groundY-305),mkCoin(3120,groundY-240),mkCoin(3300,groundY-95)];
-    pastaObjs=[{x:2320,y:groundY-55,r:22,taken:false}];
   } else {
-    // Livello boss: tratto iniziale + arena finale
-    addGround(platforms,0,950);addGround(platforms,1070,620);addGround(platforms,1800,600);addGround(platforms,2550,1450);
-    platforms.push({x:620,y:groundY-150,w:170,h:20},{x:1320,y:groundY-180,w:180,h:20},{x:2050,y:groundY-150,w:180,h:20});
-    enemies=[mkEnemy(620,-70),mkEnemy(1450,-75),mkEnemy(2190,-80)];
-    coinObjs=[mkCoin(660,groundY-200),mkCoin(1380,groundY-230),mkCoin(2110,groundY-200),mkCoin(2700,groundY-100)];
-    pastaObjs=[{x:2920,y:groundY-55,r:22,taken:false}];
-    boss={x:3300,y:groundY-120,w:120,h:120,vx:-80,hp:5,maxHp:5,alive:true,hitCooldown:0};
-    bossHud.style.display='block';bossFill.style.width='100%';
+    addGround(platforms,0,950);addGround(platforms,1070,620);addGround(platforms,1800,600);addGround(platforms,2550,1250+extra);
+    platforms.push({x:620,y:groundY-150,w:170,h:20},{x:1320,y:groundY-180,w:180,h:20},{x:2050,y:groundY-150,w:180,h:20},{x:2820,y:groundY-190,w:170,h:20});
   }
+
+  const enemySpeed=55+(n-1)*6;
+  const enemyCount=5+(n-1);
+  const spawnXs=[520,850,1160,1480,1800,2150,2490,2780,3050,3270,3450,3600,3720];
+  enemies=spawnXs.slice(0,Math.min(enemyCount,spawnXs.length)).map((x,i)=>mkEnemy(x,(i%2?-1:1)*enemySpeed));
+
+  for(let x=420,i=0;x<worldW-500;x+=390,i++){
+    coinObjs.push(mkCoin(x,groundY-(i%3===0?180:(i%3===1?90:235))));
+  }
+
+  pastaObjs=[{x:Math.floor(worldW*.43),y:groundY-55,r:22,taken:false}];
+  burgerObjs=[{x:Math.floor(worldW*.64),y:groundY-56,r:23,taken:false}];
 
   boxes=[
     {x:520,y:groundY-210,w:42,h:42,hit:false},
     {x:1480,y:groundY-210,w:42,h:42,hit:false},
     {x:2220,y:groundY-220,w:42,h:42,hit:false}
-  ].filter(b=>b.x<worldW-250);
+  ].filter(b=>b.x<worldW-450);
 
-  if(n<4) goal={x:worldW-150,y:groundY-180,w:18,h:180};
+  const mega=n===8;
+  const bw=mega?190:96;
+  const bh=mega?190:96;
+  const hp=mega?14:(2+Math.floor((n-1)/2));
+  boss={
+    x:worldW-(mega?500:390),
+    y:groundY-bh,
+    w:bw,h:bh,
+    vx:-(mega?120:(75+n*7)),
+    hp:hp,maxHp:hp,alive:true,hitCooldown:0,
+    mega:mega,
+    arenaLeft:worldW-(mega?900:720)
+  };
+  bossTitle.textContent=mega?'MEGABOSS FINALE':'MINIBOSS LIVELLO '+n;
+  bossFill.style.width='100%';
+
+  if(!mega) goal={x:worldW-125,y:groundY-180,w:18,h:180};
+
   if(resetPlayer) respawn();
   setHud();
 }
@@ -213,7 +294,7 @@ function nextLevel(){
   if(transitionLock)return;transitionLock=true;sfxLevel();score+=500;setHud();
   running=false;stopMusic();
   overlay.style.display='flex';titleEl.textContent='LIVELLO '+currentLevel+' COMPLETATO!';
-  messageEl.textContent='Preparati per il livello '+(currentLevel+1)+'.';
+  messageEl.textContent='Miniboss sconfitto! Preparati per il livello '+(currentLevel+1)+'.';
   startBtn.textContent='CONTINUA';
   startBtn.dataset.mode='next';
 }
@@ -237,13 +318,21 @@ function update(dt){
       if(pastaMusic)restoreLevelMusic();
     }
   }
+  if(speedBoost>0){
+    speedBoost=Math.max(0,speedBoost-dt);
+    speedHud.style.display='block';
+    speedTime.textContent=speedBoost.toFixed(1);
+    if(speedBoost<=0)speedHud.style.display='none';
+  }
   if(boss&&boss.hitCooldown>0)boss.hitCooldown-=dt;
   const oldY=player.y;
 
-  if(keys.left){player.vx-=720*dt;player.face=-1}
-  if(keys.right){player.vx+=720*dt;player.face=1}
+  const accel=speedBoost>0?1500:720;
+  if(keys.left){player.vx-=accel*dt;player.face=-1}
+  if(keys.right){player.vx+=accel*dt;player.face=1}
   if(!keys.left&&!keys.right)player.vx*=Math.pow(.82,dt*60);
-  player.vx=Math.max(-235,Math.min(235,player.vx));
+  const maxSpeed=speedBoost>0?520:235;
+  player.vx=Math.max(-maxSpeed,Math.min(maxSpeed,player.vx));
   if(keys.jump&&player.onGround){player.vy=-650;player.onGround=false;sfxJump()}
   player.vy+=1000*dt;
   player.x+=player.vx*dt;player.x=Math.max(0,Math.min(worldW-player.w,player.x));
@@ -303,18 +392,50 @@ function update(dt){
     }
   }
 
-  if(goal&&player.x+player.w>goal.x)nextLevel();
+  // Hamburger: supervelocità per 7 secondi
+  for(const b of burgerObjs){
+    if(b.taken)continue;
+    const cx=Math.max(player.x,Math.min(b.x,player.x+player.w));
+    const cy=Math.max(player.y,Math.min(b.y,player.y+player.h));
+    if(Math.hypot(b.x-cx,b.y-cy)<b.r+8){
+      b.taken=true;
+      speedBoost=7;
+      score+=300;
+      sfxBurger();
+      speedHud.style.display='block';
+      speedTime.textContent='7.0';
+      setHud();
+    }
+  }
+
+  if(goal&&(!boss||!boss.alive)&&player.x+player.w>goal.x)nextLevel();
 
   if(boss&&boss.alive){
     boss.x+=boss.vx*dt;
-    if(boss.x<2850||boss.x>worldW-150-boss.w)boss.vx*=-1;
+    if(boss.x<boss.arenaLeft||boss.x>worldW-120-boss.w)boss.vx*=-1;
+
     if(rectHit(player,boss)){
-      const stomp=player.vy>0&&oldY+player.h<=boss.y+30&&boss.hitCooldown<=0;
+      const stomp=player.vy>0&&oldY+player.h<=boss.y+(boss.mega?55:28)&&boss.hitCooldown<=0;
       if(stomp){
-        boss.hp--;boss.hitCooldown=.7;player.vy=-430;score+=500;sfxBossHit();
-        bossFill.style.width=(100*boss.hp/boss.maxHp)+'%';setHud();
-        if(boss.hp<=0){boss.alive=false;score+=2500;setHud();setTimeout(winGame,500)}
-      } else if(boss.hitCooldown<=0) loseLife();
+        boss.hp--;
+        boss.hitCooldown=boss.mega?.48:.60;
+        player.vy=boss.mega?-500:-430;
+        score+=boss.mega?800:450;
+        sfxBossHit();
+        bossFill.style.width=(100*boss.hp/boss.maxHp)+'%';
+        setHud();
+
+        if(boss.hp<=0){
+          boss.alive=false;
+          bossHud.style.display='none';
+          score+=boss.mega?5000:1500;
+          setHud();
+          if(boss.mega)setTimeout(winGame,500);
+          else sfxLevel();
+        }
+      } else if(boss.hitCooldown<=0) {
+        loseLife();
+      }
     }
   }
 
@@ -333,7 +454,7 @@ function draw(){
     ['#a2b7ff','#4d9b50','#6d4c36'],
     ['#ffaf63','#3f8344','#5f4330']
   ];
-  const pal=palettes[currentLevel-1];
+  const pal=palettes[(currentLevel-1)%palettes.length];
   ctx.fillStyle=pal[0];ctx.fillRect(0,0,W,H);
 
   ctx.fillStyle='rgba(255,255,255,.85)';
@@ -380,6 +501,23 @@ function draw(){
     ctx.restore();
   }
 
+  // Hamburger turbo
+  for(const b of burgerObjs){
+    if(b.taken)continue;
+    ctx.save();
+    const bob=Math.sin(animTime*5+b.x*.012)*3;
+    ctx.translate(b.x,b.y+bob);
+    ctx.fillStyle='#d99a3a';
+    ctx.beginPath();ctx.arc(0,-7,23,Math.PI,0);ctx.lineTo(23,-2);ctx.lineTo(-23,-2);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#fff2bd';
+    for(const sx of [-12,-4,5,13]){ctx.beginPath();ctx.ellipse(sx,-14+(sx%3),2,1,0,0,Math.PI*2);ctx.fill();}
+    ctx.fillStyle='#4ea94e';ctx.fillRect(-22,-2,44,5);
+    ctx.fillStyle='#ffd83d';ctx.fillRect(-20,3,40,5);
+    ctx.fillStyle='#6e3b23';ctx.fillRect(-21,8,42,8);
+    ctx.fillStyle='#d99a3a';ctx.beginPath();ctx.ellipse(0,17,22,7,0,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+
   for(const e of enemies){
     if(!e.alive)continue;
 
@@ -415,20 +553,43 @@ function draw(){
 
     drawFace(enemyFace,e.x+2,e.y,48,48);
   }
-  if(goal){
+  if(goal&&(!boss||!boss.alive)){
     ctx.fillStyle='#eee';ctx.fillRect(goal.x,goal.y,goal.w,goal.h);
     ctx.fillStyle='#2d8f3a';ctx.beginPath();ctx.moveTo(goal.x+goal.w,goal.y+10);ctx.lineTo(goal.x+88,goal.y+35);ctx.lineTo(goal.x+goal.w,goal.y+60);ctx.closePath();ctx.fill();
   }
 
   if(boss&&boss.alive){
-    // corpo del boss, molto più grande dei nemici normali
-    ctx.fillStyle='#73401f';ctx.fillRect(boss.x+12,boss.y+55,boss.w-24,60);
-    ctx.fillStyle='#2f8a3b';ctx.beginPath();ctx.ellipse(boss.x+60,boss.y+73,55,42,0,0,Math.PI*2);ctx.fill();
+    const s=boss.w/120;
+    ctx.save();
+    ctx.translate(boss.x,boss.y);
+
+    ctx.fillStyle='rgba(0,0,0,.22)';
+    ctx.beginPath();ctx.ellipse(boss.w/2,boss.h+5,boss.w*.42,11*s,0,0,Math.PI*2);ctx.fill();
+
+    ctx.fillStyle=boss.mega?'#4b1738':'#73401f';
+    ctx.beginPath();ctx.ellipse(boss.w/2,boss.h*.66,boss.w*.43,boss.h*.34,0,0,Math.PI*2);ctx.fill();
+
+    ctx.fillStyle=boss.mega?'#c43c35':'#2f8a3b';
+    ctx.beginPath();ctx.ellipse(boss.w/2,boss.h*.56,boss.w*.46,boss.h*.27,0,0,Math.PI*2);ctx.fill();
+
     ctx.fillStyle='#eee';
-    for(let i=0;i<4;i++){
-      ctx.beginPath();ctx.moveTo(boss.x+25+i*24,boss.y+48);ctx.lineTo(boss.x+34+i*24,boss.y+26);ctx.lineTo(boss.x+43+i*24,boss.y+48);ctx.fill();
+    const spikes=boss.mega?6:4;
+    for(let i=0;i<spikes;i++){
+      const xx=boss.w*.18+i*(boss.w*.64/(spikes-1));
+      ctx.beginPath();
+      ctx.moveTo(xx-7*s,boss.h*.32);
+      ctx.lineTo(xx,boss.h*.12-(i%2)*8*s);
+      ctx.lineTo(xx+7*s,boss.h*.32);
+      ctx.fill();
     }
-    drawFace(enemyFace,boss.x+22,boss.y-4,76,76);
+
+    drawFace(enemyFace,boss.w*.18,boss.h*.02,boss.w*.64,boss.w*.64);
+
+    if(boss.mega){
+      ctx.strokeStyle='#ffd84d';ctx.lineWidth=5;
+      ctx.beginPath();ctx.arc(boss.w/2,boss.h*.35,boss.w*.39+Math.sin(animTime*6)*5,0,Math.PI*2);ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // protagonista con braccia e gambe animate
@@ -524,17 +685,44 @@ function loop(t){
 }
 
 function startFresh(){
-  ensureAudio();score=0;coins=0;lives=3;currentLevel=1;transitionLock=false;buildLevel(1,true);
-  overlay.style.display='none';running=true;startMusic();last=performance.now();requestAnimationFrame(loop);
+  createAudio();score=0;coins=0;lives=3;currentLevel=1;transitionLock=false;buildLevel(1,true);
+  overlay.style.display='none';running=true;playToneNow(523,.08,'square',.05);startMusic();last=performance.now();requestAnimationFrame(loop);
 }
 function continueNext(){
   currentLevel++;transitionLock=false;buildLevel(currentLevel,true);
   overlay.style.display='none';running=true;startMusic();last=performance.now();requestAnimationFrame(loop);
 }
-startBtn.addEventListener('click',()=>{
-  ensureAudio();
-  if(startBtn.dataset.mode==='next'){startBtn.dataset.mode='';continueNext()}
-  else startFresh();
+async function unlockSound(){
+  soundEnabled=true;
+  soundBtn.disabled=true;
+  soundBtn.textContent='🔊 ATTIVAZIONE...';
+
+  const ok=await unlockAudio();
+  if(ok){
+    playToneNow(660,.10,'square',.07);
+    setTimeout(()=>playToneNow(880,.12,'square',.07),90);
+    soundBtn.textContent='🔊 SUONO ATTIVO';
+  }else{
+    soundBtn.textContent='🔇 TOCCA DI NUOVO';
+  }
+  soundBtn.disabled=false;
+}
+
+// Use only click: on iPhone/Safari this is a reliable explicit user gesture.
+soundBtn.addEventListener('click',unlockSound);
+
+startBtn.addEventListener('click',async()=>{
+  // GIOCA itself also unlocks audio, so the extra sound button is optional.
+  soundEnabled=true;
+  const ok=await unlockAudio();
+  if(ok)playToneNow(523,.10,'square',.055);
+
+  if(startBtn.dataset.mode==='next'){
+    startBtn.dataset.mode='';
+    continueNext();
+  }else{
+    startFresh();
+  }
 });
 
 function hold(id,key){
@@ -544,6 +732,17 @@ function hold(id,key){
   ['pointerdown','touchstart'].forEach(ev=>el.addEventListener(ev,on,{passive:false}));
   ['pointerup','pointercancel','pointerleave','touchend','touchcancel'].forEach(ev=>el.addEventListener(ev,off,{passive:false}));
 }
+
+if(createAudio()){
+  audioCtx.addEventListener('statechange',()=>{
+    if(audioCtx.state==='running'){
+      soundBtn.textContent='🔊 SUONO ATTIVO';
+    }else if(audioCtx.state==='suspended'||audioCtx.state==='interrupted'){
+      soundBtn.textContent='🔊 RIATTIVA SUONO';
+    }
+  });
+}
+
 hold('left','left');hold('right','right');hold('jump','jump');
 addEventListener('keydown',e=>{if(e.code==='ArrowLeft')keys.left=true;if(e.code==='ArrowRight')keys.right=true;if(e.code==='Space'||e.code==='ArrowUp')keys.jump=true});
 addEventListener('keyup',e=>{if(e.code==='ArrowLeft')keys.left=false;if(e.code==='ArrowRight')keys.right=false;if(e.code==='Space'||e.code==='ArrowUp')keys.jump=false});
