@@ -89,6 +89,7 @@ const player={x:100,y:0,w:64,h:84,vx:0,vy:0,onGround:false,face:1,invuln:0};
 let score=0,coins=0,lives=3,currentLevel=1;
 let worldW=3600,groundY=0,platforms=[],coinObjs=[],enemies=[],boxes=[],pastaObjs=[],burgerObjs=[],iceCreamObjs=[],goal=null,boss=null;
 let pastaInvuln=0,pastaMusic=false,speedBoost=0;
+let cutsceneActive=false,cutsceneTime=0,cutsceneFireworks=[],cutsceneMusicTimer=null,lastFireworkAt=-1;
 let transitionLock=false;
 
 let audioCtx=null,musicTimer=null,musicStep=0,soundEnabled=true,masterGain=null;
@@ -168,6 +169,55 @@ function sfxPasta(){[659,784,988,1319].forEach((f,i)=>setTimeout(()=>tone(f,.10,
 function sfxBurger(){[440,660,880,1100].forEach((f,i)=>setTimeout(()=>tone(f,.07,'square',.04),i*45))}
 function sfxIceCream(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.09,'square',.05),i*65))}
 function sfxWin(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.045),i*120))}
+
+function startVictoryMusic(){
+  stopMusic();
+  if(cutsceneMusicTimer){clearInterval(cutsceneMusicTimer);cutsceneMusicTimer=null;}
+
+  const melody=[
+    392,0,523,659, 0,784,880,784,
+    659,0,587,659, 784,0,988,1047,
+    1175,0,1047,988, 880,784,0,659,
+    784,0,988,1175, 1319,0,1568,1319
+  ];
+  const bass=[98,0,110,0,131,0,147,0];
+  const chord=[262,330,392];
+  let i=0;
+
+  const tick=()=>{
+    if(!cutsceneActive)return;
+    const beat=i%32, n=melody[beat];
+
+    if(n) tone(n,.22,'square',.025);
+
+    if(beat%8===2||beat%8===6){
+      setTimeout(()=>tone(chord[0],.16,'triangle',.010),20);
+      setTimeout(()=>tone(chord[1],.16,'triangle',.009),35);
+      setTimeout(()=>tone(chord[2],.16,'triangle',.008),50);
+    }
+
+    const b=bass[i%8];
+    if(b) tone(b,.28,'sawtooth',.016);
+
+    if(beat%8===0) tone(75,.07,'sine',.020);
+    if(beat%8===4) tone(165,.045,'square',.011);
+    if(beat%2===1) tone(1050,.018,'square',.004);
+
+    if(beat===31){
+      setTimeout(()=>tone(1568,.20,'triangle',.012),100);
+      setTimeout(()=>tone(2093,.18,'triangle',.010),190);
+    }
+
+    i++;
+  };
+
+  tick();
+  cutsceneMusicTimer=setInterval(tick,300);
+}
+function stopVictoryMusic(){
+  if(cutsceneMusicTimer){clearInterval(cutsceneMusicTimer);cutsceneMusicTimer=null;}
+}
+
 const themes=[
  [523,659,784,659,587,698,880,698],
  [587,740,880,740,659,784,988,784],
@@ -177,22 +227,128 @@ const themes=[
 function startMusic(){
   stopMusic();musicStep=0;pastaMusic=false;
   createAudio();
-  const seq=themes[currentLevel-1]||themes[0];
-  const tick=()=>{if(!running)return;const n=seq[musicStep%seq.length];tone(n,.10,'square',.020);if(musicStep%2===0)tone(n/4,.12,'triangle',.012);musicStep++};
-  tick();musicTimer=setInterval(tick,currentLevel===4?175:150);
+
+  // 8 arrangiamenti in stile videogioco di temi classici di pubblico dominio.
+  // Frequenze: C4 262, D4 294, Eb4 311, E4 330, F4 349, G4 392,
+  // Ab4 415, A4 440, Bb4 466, B4 494, C5 523, D5 587, Eb5 622,
+  // E5 659, F5 698, G5 784, A5 880, Bb5 932, B5 988, C6 1047.
+  const songs=[
+    { // L1 Mozart - Eine kleine Nachtmusik, opening
+      tempo:285,
+      lead:[784,0,587,784,587,784,988,587, 523,0,659,523,659,784,523,0,
+            784,0,587,784,587,784,988,1175, 1047,988,880,784,698,659,587,523],
+      bass:[196,0,147,0,165,0,131,0],
+      chord:[392,494,587]
+    },
+    { // L2 Beethoven - Ode to Joy
+      tempo:330,
+      lead:[659,659,698,784,784,698,659,587,523,523,587,659,659,587,587,0,
+            659,659,698,784,784,698,659,587,523,523,587,659,587,523,523,0],
+      bass:[131,0,196,0,147,0,196,0],
+      chord:[262,330,392]
+    },
+    { // L3 Mozart - Rondo Alla Turca inspired arrangement
+      tempo:245,
+      lead:[494,523,587,622,659,622,587,523,494,523,587,622,659,622,587,523,
+            440,466,494,523,587,523,494,466,440,466,494,523,587,523,494,440],
+      bass:[110,0,165,0,123,0,165,0],
+      chord:[220,277,330]
+    },
+    { // L4 Beethoven - Symphony No.5 motif
+      tempo:315,
+      lead:[392,392,392,311,0,0,349,349,349,294,0,0,
+            392,392,392,311,415,415,415,392,622,622,622,523,0,0],
+      bass:[104,0,104,0,78,0,117,0],
+      chord:[208,262,311]
+    },
+    { // L5 Mozart - Symphony No.40 opening
+      tempo:255,
+      lead:[466,466,466,415,0,0,392,392,392,349,0,0,
+            330,330,330,311,0,0,294,294,294,262,0,0],
+      bass:[117,0,104,0,98,0,87,0],
+      chord:[233,294,349]
+    },
+    { // L6 Beethoven - Moonlight Sonata-like opening arpeggio
+      tempo:300,
+      lead:[415,523,622,415,523,622,415,523,622,392,494,587,392,494,587,392,
+            466,554,698,466,554,698,440,523,659,440,523,659,415,523,622,415],
+      bass:[104,0,98,0,117,0,110,0],
+      chord:[208,262,311]
+    },
+    { // L7 Mozart - Figaro overture-flavoured fast classical figure
+      tempo:235,
+      lead:[523,659,784,659,523,659,784,988,1047,988,880,784,659,784,880,988,
+            784,659,587,523,587,659,698,784,880,784,698,659,587,523,494,523],
+      bass:[131,0,165,0,196,0,165,0],
+      chord:[262,330,392]
+    },
+    { // L8 Beethoven - dramatic final medley based on Symphony No.5 motif
+      tempo:285,
+      lead:[392,392,392,311,0,311,349,392,415,415,415,392,0,392,466,523,
+            622,622,622,523,0,523,587,622,784,698,622,587,523,466,392,311],
+      bass:[104,0,78,0,104,0,117,0],
+      chord:[208,262,311]
+    }
+  ];
+
+  const song=songs[Math.max(0,Math.min(7,currentLevel-1))];
+  const tick=()=>{
+    if(!running||cutsceneActive||pastaInvuln>0)return;
+    const s=musicStep, n=song.lead[s%song.lead.length];
+
+    if(n) tone(n,song.tempo/1000*.80,'triangle',.023);
+
+    // Light orchestral-style chord support.
+    if(s%4===0){
+      tone(song.chord[0],song.tempo/1000*2.7,'triangle',.009);
+      setTimeout(()=>tone(song.chord[1],song.tempo/1000*2.5,'triangle',.008),25);
+      setTimeout(()=>tone(song.chord[2],song.tempo/1000*2.3,'triangle',.007),50);
+    }
+
+    const b=song.bass[s%8];
+    if(b) tone(b,song.tempo/1000*1.7,'sawtooth',.012);
+
+    // Soft percussion keeps it game-like without overwhelming the melody.
+    if(s%8===0) tone(72,.055,'sine',.012);
+    if(s%8===4) tone(145,.035,'square',.005);
+
+    musicStep++;
+  };
+
+  tick();
+  musicTimer=setInterval(tick,song.tempo);
 }
 function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null}}
 function startPastaMusic(){
   stopMusic();musicStep=0;pastaMusic=true;
-  const seq=[784,988,1175,1319,1175,988,1568,1319,988,1175,1319,1760];
+
+  const lead=[659,0,784,988,0,1047,988,784, 880,0,988,1175,0,1319,1175,988];
+  const bass=[131,0,165,0,196,0,175,0];
+
   const tick=()=>{
     if(!running||pastaInvuln<=0)return;
-    const n=seq[musicStep%seq.length];
-    tone(n,.085,'square',.024);
-    if(musicStep%2===0)tone(n/2,.09,'triangle',.014);
+    const s=musicStep, beat=s%16;
+    const n=lead[beat];
+
+    if(n) tone(n,.16,'square',.024);
+    if(beat===2||beat===6||beat===10||beat===14){
+      setTimeout(()=>tone(330,.12,'triangle',.010),20);
+      setTimeout(()=>tone(415,.12,'triangle',.009),35);
+      setTimeout(()=>tone(494,.12,'triangle',.008),50);
+    }
+
+    const b=bass[s%8];
+    if(b) tone(b,.22,'sawtooth',.016);
+
+    if(beat===0||beat===8) tone(78,.06,'sine',.020);
+    if(beat===4||beat===12) tone(170,.04,'square',.010);
+    if(beat%2===1) tone(1100,.016,'square',.004);
+
     musicStep++;
   };
-  tick();musicTimer=setInterval(tick,105);
+
+  tick();
+  musicTimer=setInterval(tick,255);
 }
 function restoreLevelMusic(){
   if(!running)return;
@@ -301,20 +457,295 @@ function nextLevel(){
   if(transitionLock)return;transitionLock=true;sfxLevel();score+=500;setHud();
   running=false;stopMusic();
   overlay.style.display='flex';titleEl.textContent='LIVELLO '+currentLevel+' COMPLETATO!';
-  messageEl.textContent='Miniboss sconfitto! Preparati per il livello '+(currentLevel+1)+'.';
+  const musicNames=['Mozart: Eine kleine Nachtmusik','Beethoven: Inno alla gioia','Mozart: Rondò alla turca','Beethoven: Quinta Sinfonia','Mozart: Sinfonia n. 40','Beethoven: Chiaro di luna','Mozart: Le nozze di Figaro','Beethoven: Finale eroico'];
+  messageEl.textContent='Miniboss sconfitto! Livello '+(currentLevel+1)+': '+musicNames[currentLevel]+'.';
   startBtn.textContent='CONTINUA';
   startBtn.dataset.mode='next';
 }
 
 function winGame(){
-  running=false;stopMusic();bossHud.style.display='none';sfxWin();
-  overlay.style.display='flex';titleEl.textContent='HAI VINTO!';
-  messageEl.textContent='Boss sconfitto! Punteggio finale: '+score+' • Monete: '+coins;
-  startBtn.textContent='RIGIOCA';startBtn.dataset.mode='restart';
+  cutsceneActive=false;
+  stopVictoryMusic();
+  running=false;
+  stopMusic();
+  bossHud.style.display='none';
+  overlay.style.display='flex';
+  titleEl.textContent='MICHAELBROS COMPLETATO!';
+  messageEl.textContent='Michael ha sconfitto il Megaboss e liberato la principessa! Punteggio finale: '+score+' • Monete: '+coins;
+  startBtn.textContent='RIGIOCA';
+  startBtn.dataset.mode='restart';
+}
+
+
+function spawnFirework(){
+  const x=W*(.15+Math.random()*.70);
+  const y=H*(.10+Math.random()*.35);
+  const palette=['#ffd84d','#ff6b9d','#7cf3ff','#9cff77','#ffffff','#b685ff'];
+  const c=palette[Math.floor(Math.random()*palette.length)];
+  for(let i=0;i<30;i++){
+    const a=Math.PI*2*i/30+Math.random()*.12;
+    const sp=70+Math.random()*150;
+    cutsceneFireworks.push({
+      x,y,
+      vx:Math.cos(a)*sp,
+      vy:Math.sin(a)*sp,
+      life:1.1+Math.random()*.6,
+      maxLife:1.7,
+      c,
+      size:2+Math.random()*2.5
+    });
+  }
+  tone(180+Math.random()*80,.05,'square',.035);
+  setTimeout(()=>tone(95+Math.random()*40,.13,'triangle',.025),70);
+}
+
+function startVictoryCutscene(){
+  if(cutsceneActive)return;
+  cutsceneActive=true;
+  cutsceneTime=0;
+  lastFireworkAt=-1;
+  cutsceneFireworks=[];
+  keys.left=keys.right=keys.jump=false;
+  invHud.style.display='none';
+  speedHud.style.display='none';
+  bossHud.style.display='none';
+  startVictoryMusic();
+  spawnFirework();
+}
+
+function updateVictoryCutscene(dt){
+  cutsceneTime+=dt;
+
+  // Fireworks become denser toward the end.
+  const interval=cutsceneTime<3?1.0:(cutsceneTime<7?.72:.45);
+  if(lastFireworkAt<0 || cutsceneTime-lastFireworkAt>interval){
+    spawnFirework();
+    lastFireworkAt=cutsceneTime;
+  }
+
+  for(const p of cutsceneFireworks){
+    p.life-=dt;
+    p.x+=p.vx*dt;
+    p.y+=p.vy*dt;
+    p.vy+=75*dt;
+    p.vx*=Math.pow(.992,dt*60);
+  }
+  cutsceneFireworks=cutsceneFireworks.filter(p=>p.life>0);
+
+  if(cutsceneTime>=10.5) winGame();
+}
+
+function drawPrincess(x,y,scale=1){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.scale(scale,scale);
+
+  // skirt
+  ctx.fillStyle='#e85b9d';
+  ctx.beginPath();
+  ctx.moveTo(-25,28);
+  ctx.quadraticCurveTo(-40,65,-48,86);
+  ctx.lineTo(48,86);
+  ctx.quadraticCurveTo(40,65,25,28);
+  ctx.closePath();
+  ctx.fill();
+
+  // dress highlights
+  ctx.fillStyle='#ff9bc6';
+  ctx.beginPath();
+  ctx.ellipse(0,57,24,33,0,0,Math.PI*2);
+  ctx.fill();
+
+  // torso
+  ctx.fillStyle='#e85b9d';
+  ctx.fillRect(-18,5,36,33);
+
+  // arms
+  ctx.strokeStyle='#f3c6a4';
+  ctx.lineWidth=8;
+  ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(-16,14);ctx.lineTo(-30,28);
+  ctx.moveTo(16,14);ctx.lineTo(30,28);
+  ctx.stroke();
+
+  // head
+  ctx.fillStyle='#f3c6a4';
+  ctx.beginPath();
+  ctx.arc(0,-17,22,0,Math.PI*2);
+  ctx.fill();
+
+  // hair
+  ctx.fillStyle='#f2c341';
+  ctx.beginPath();
+  ctx.arc(0,-23,25,Math.PI,0);
+  ctx.lineTo(23,-4);
+  ctx.quadraticCurveTo(18,20,8,18);
+  ctx.lineTo(-8,18);
+  ctx.quadraticCurveTo(-18,20,-23,-4);
+  ctx.closePath();
+  ctx.fill();
+
+  // eyes
+  ctx.fillStyle='#222';
+  ctx.beginPath();ctx.arc(-7,-16,2.4,0,Math.PI*2);ctx.arc(7,-16,2.4,0,Math.PI*2);ctx.fill();
+
+  // smile
+  ctx.strokeStyle='#b04455';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.arc(0,-9,8,.15,Math.PI-.15);
+  ctx.stroke();
+
+  // crown
+  ctx.fillStyle='#ffd84d';
+  ctx.strokeStyle='#b78700';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(-13,-42);ctx.lineTo(-8,-55);ctx.lineTo(0,-46);ctx.lineTo(8,-56);ctx.lineTo(14,-42);
+  ctx.closePath();ctx.fill();ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawHeart(x,y,size){
+  const pulse=1+Math.sin(cutsceneTime*7)*.08;
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.scale(pulse,pulse);
+  ctx.fillStyle='#ff4f73';
+  ctx.strokeStyle='#fff';
+  ctx.lineWidth=Math.max(2,size*.08);
+  ctx.beginPath();
+  ctx.moveTo(0,size*.30);
+  ctx.bezierCurveTo(-size*.58,-size*.05,-size*.48,-size*.55,0,-size*.25);
+  ctx.bezierCurveTo(size*.48,-size*.55,size*.58,-size*.05,0,size*.30);
+  ctx.closePath();
+  ctx.fill();ctx.stroke();
+  ctx.restore();
+}
+
+function drawVictoryCutscene(){
+  const t=cutsceneTime;
+
+  // night-sky background
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#17134d');
+  grad.addColorStop(.55,'#45256f');
+  grad.addColorStop(1,'#8f4968');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,W,H);
+
+  // stars
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  for(let i=0;i<55;i++){
+    const x=(i*97)%W;
+    const y=28+(i*53)%(Math.max(80,H*.48));
+    const s=1+(i%3);
+    ctx.fillRect(x,y,s,s);
+  }
+
+  // distant hills
+  ctx.fillStyle='#18284b';
+  ctx.beginPath();
+  ctx.moveTo(0,H*.67);
+  for(let x=0;x<=W;x+=70){
+    ctx.lineTo(x,H*.50-(x%140?15:45));
+  }
+  ctx.lineTo(W,H*.78);ctx.lineTo(0,H*.78);ctx.closePath();ctx.fill();
+
+  // castle on right
+  const castleX=W*.77;
+  const baseY=H*.73;
+  ctx.fillStyle='#6c6b82';
+  ctx.fillRect(castleX,baseY-150,130,150);
+  ctx.fillRect(castleX-30,baseY-115,45,115);
+  ctx.fillRect(castleX+115,baseY-115,45,115);
+  ctx.fillStyle='#4a495e';
+  ctx.fillRect(castleX+47,baseY-65,35,65);
+  ctx.fillStyle='#ffd76a';
+  ctx.fillRect(castleX+18,baseY-115,15,22);
+  ctx.fillRect(castleX+96,baseY-115,15,22);
+
+  // battlements
+  ctx.fillStyle='#85849a';
+  for(let i=-1;i<7;i++)ctx.fillRect(castleX+i*25,baseY-165,15,20);
+
+  // ground
+  ctx.fillStyle='#4b453f';
+  ctx.fillRect(0,H*.73,W,H*.27);
+  ctx.fillStyle='#6d655b';
+  ctx.fillRect(0,H*.73,W,16);
+
+  // Michael enters from left during first two seconds.
+  const heroTarget=W*.39;
+  const heroX=t<2 ? -70+(heroTarget+70)*(t/2) : heroTarget;
+  const princessX=W*.57;
+
+  // simple body under Michael's existing face
+  ctx.save();
+  ctx.translate(heroX,H*.73-86);
+  ctx.fillStyle='#d94335';ctx.fillRect(-18,22,36,25);
+  ctx.fillStyle='#2c63d8';ctx.fillRect(-18,45,36,27);
+  ctx.strokeStyle='#d94335';ctx.lineWidth=8;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(-15,30);ctx.lineTo(-30,45);ctx.moveTo(15,30);ctx.lineTo(30,45);ctx.stroke();
+  ctx.strokeStyle='#2c63d8';ctx.lineWidth=9;
+  ctx.beginPath();ctx.moveTo(-9,69);ctx.lineTo(-13,85);ctx.moveTo(9,69);ctx.lineTo(13,85);ctx.stroke();
+  drawFace(heroFace,-32,-34,64,64);
+  ctx.restore();
+
+  // Princess appears from the castle after 2 seconds.
+  if(t>1.8){
+    const appear=Math.min(1,(t-1.8)/1.0);
+    ctx.save();
+    ctx.globalAlpha=appear;
+    drawPrincess(princessX,H*.73-86,1);
+    ctx.restore();
+  }
+
+  // heart after they meet
+  if(t>3.0)drawHeart((heroTarget+princessX)/2,H*.73-150,42);
+
+  // fireworks
+  for(const p of cutsceneFireworks){
+    ctx.globalAlpha=Math.max(0,p.life/p.maxLife);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // captions
+  ctx.textAlign='center';
+  ctx.shadowColor='rgba(0,0,0,.8)';
+  ctx.shadowBlur=5;
+  if(t<2.2){
+    ctx.fillStyle='#fff';
+    ctx.font='bold 28px sans-serif';
+    ctx.fillText('IL MEGABOSS È STATO SCONFITTO!',W/2,58);
+  }else if(t<6.8){
+    ctx.fillStyle='#ffd84d';
+    ctx.font='bold 31px sans-serif';
+    ctx.fillText('PRINCIPESSA LIBERATA!',W/2,58);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 20px sans-serif';
+    ctx.fillText('Grazie Michael! Mi hai salvata!',W/2,91);
+  }else{
+    ctx.fillStyle='#ffd84d';
+    ctx.font='bold 34px sans-serif';
+    ctx.fillText('MICHAELBROS COMPLETATO!',W/2,58);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 20px sans-serif';
+    ctx.fillText('♥  IL NOSTRO EROE!  ♥',W/2,92);
+  }
+  ctx.shadowBlur=0;
+  ctx.textAlign='left';
 }
 
 function update(dt){
   animTime += dt;
+  if(cutsceneActive){updateVictoryCutscene(dt);return;}
   if(player.invuln>0)player.invuln-=dt;
   if(pastaInvuln>0){
     pastaInvuln=Math.max(0,pastaInvuln-dt);
@@ -453,7 +884,7 @@ function update(dt){
           bossHud.style.display='none';
           score+=boss.mega?5000:1500;
           setHud();
-          if(boss.mega)setTimeout(winGame,1600);
+          if(boss.mega)setTimeout(startVictoryCutscene,1300);
           else sfxLevel();
         }
       } else if(boss.hitCooldown<=0) {
@@ -471,6 +902,7 @@ function drawFace(img,x,y,w,h){
 
 function draw(){
   ctx.clearRect(0,0,W,H);
+  if(cutsceneActive){drawVictoryCutscene();return;}
   const palettes=[
     ['#69bff5','#5dbb43','#7a4f2b'],
     ['#7fc8ff','#5aaf50','#76522d'],
@@ -876,7 +1308,8 @@ function loop(t){
 }
 
 function startFresh(){
-  createAudio();score=0;coins=0;lives=3;currentLevel=1;transitionLock=false;buildLevel(1,true);
+  cutsceneActive=false;cutsceneTime=0;cutsceneFireworks=[];stopVictoryMusic();
+  createAudio();score=0;coins=0;lives=5;currentLevel=1;transitionLock=false;buildLevel(1,true);
   overlay.style.display='none';running=true;playToneNow(523,.08,'square',.05);startMusic();last=performance.now();requestAnimationFrame(loop);
 }
 function continueNext(){
