@@ -53,7 +53,7 @@ button:active,.active{background:#fff5}
 <div id="overlay">
   <div class="panel">
     <h1 id="title">MichaelBros</h1>
-    <p id="message">Otto livelli, un miniboss in ogni livello e un MEGABOSS finale. La pasta dà invincibilità e muscoli; l'hamburger dà supervelocità per 7 secondi!</p>
+    <p id="message">Otto livelli, un miniboss in ogni livello e un MEGABOSS finale. La pasta dà invincibilità e muscoli; l'hamburger dà supervelocità per 7 secondi; ogni due livelli trovi un gelato che dà una vita extra!</p>
     <button id="start">GIOCA</button><br><button id="soundBtn" style="margin-top:10px;min-width:170px;font-size:17px">🔊 ATTIVA SUONO</button>
   </div>
 </div>
@@ -87,7 +87,7 @@ enemyFace.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXwAAAF8CAYAAADM5wD
 const keys={left:false,right:false,jump:false};
 const player={x:100,y:0,w:64,h:84,vx:0,vy:0,onGround:false,face:1,invuln:0};
 let score=0,coins=0,lives=3,currentLevel=1;
-let worldW=3600,groundY=0,platforms=[],coinObjs=[],enemies=[],boxes=[],pastaObjs=[],burgerObjs=[],goal=null,boss=null;
+let worldW=3600,groundY=0,platforms=[],coinObjs=[],enemies=[],boxes=[],pastaObjs=[],burgerObjs=[],iceCreamObjs=[],goal=null,boss=null;
 let pastaInvuln=0,pastaMusic=false,speedBoost=0;
 let transitionLock=false;
 
@@ -166,6 +166,7 @@ function sfxLevel(){[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.12)
 function sfxBossHit(){tone(130,.12,'sawtooth',.06);setTimeout(()=>tone(90,.15,'square',.04),60)}
 function sfxPasta(){[659,784,988,1319].forEach((f,i)=>setTimeout(()=>tone(f,.10,'square',.045),i*70))}
 function sfxBurger(){[440,660,880,1100].forEach((f,i)=>setTimeout(()=>tone(f,.07,'square',.04),i*45))}
+function sfxIceCream(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.09,'square',.05),i*65))}
 function sfxWin(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.045),i*120))}
 const themes=[
  [523,659,784,659,587,698,880,698],
@@ -212,7 +213,7 @@ function setHud(){
 
 function buildLevel(n,resetPlayer=true){
   groundY=H-112;
-  platforms=[];coinObjs=[];enemies=[];boxes=[];pastaObjs=[];burgerObjs=[];goal=null;boss=null;
+  platforms=[];coinObjs=[];enemies=[];boxes=[];pastaObjs=[];burgerObjs=[];iceCreamObjs=[];goal=null;boss=null;
   pastaInvuln=0;pastaMusic=false;speedBoost=0;
   invHud.style.display='none';speedHud.style.display='none';
   bossHud.style.display='block';
@@ -247,6 +248,9 @@ function buildLevel(n,resetPlayer=true){
 
   pastaObjs=[{x:Math.floor(worldW*.43),y:groundY-55,r:22,taken:false}];
   burgerObjs=[{x:Math.floor(worldW*.64),y:groundY-56,r:23,taken:false}];
+  if(n%2===0){
+    iceCreamObjs=[{x:Math.floor(worldW*.78),y:groundY-58,r:23,taken:false}];
+  }
 
   boxes=[
     {x:520,y:groundY-210,w:42,h:42,hit:false},
@@ -265,6 +269,9 @@ function buildLevel(n,resetPlayer=true){
     vx:-(mega?120:(75+n*7)),
     hp:hp,maxHp:hp,alive:true,hitCooldown:0,
     mega:mega,
+    level:n,
+    shape:(n-1)%7,
+    deadTimer:0,
     arenaLeft:worldW-(mega?900:720)
   };
   bossTitle.textContent=mega?'MEGABOSS FINALE':'MINIBOSS LIVELLO '+n;
@@ -325,6 +332,7 @@ function update(dt){
     if(speedBoost<=0)speedHud.style.display='none';
   }
   if(boss&&boss.hitCooldown>0)boss.hitCooldown-=dt;
+  if(boss&&boss.deadTimer>0)boss.deadTimer=Math.max(0,boss.deadTimer-dt);
   const oldY=player.y;
 
   const accel=speedBoost>0?1500:720;
@@ -408,6 +416,20 @@ function update(dt){
     }
   }
 
+  // Gelato: una vita extra ogni due livelli
+  for(const ic of iceCreamObjs){
+    if(ic.taken)continue;
+    const cx=Math.max(player.x,Math.min(ic.x,player.x+player.w));
+    const cy=Math.max(player.y,Math.min(ic.y,player.y+player.h));
+    if(Math.hypot(ic.x-cx,ic.y-cy)<ic.r+8){
+      ic.taken=true;
+      lives++;
+      score+=500;
+      sfxIceCream();
+      setHud();
+    }
+  }
+
   if(goal&&(!boss||!boss.alive)&&player.x+player.w>goal.x)nextLevel();
 
   if(boss&&boss.alive){
@@ -427,10 +449,11 @@ function update(dt){
 
         if(boss.hp<=0){
           boss.alive=false;
+          boss.deadTimer=boss.mega?2.0:1.35;
           bossHud.style.display='none';
           score+=boss.mega?5000:1500;
           setHud();
-          if(boss.mega)setTimeout(winGame,500);
+          if(boss.mega)setTimeout(winGame,1600);
           else sfxLevel();
         }
       } else if(boss.hitCooldown<=0) {
@@ -518,6 +541,49 @@ function draw(){
     ctx.restore();
   }
 
+  // Gelato vita extra
+  for(const ic of iceCreamObjs){
+    if(ic.taken)continue;
+    ctx.save();
+    const bob=Math.sin(animTime*4.5+ic.x*.01)*3;
+    ctx.translate(ic.x,ic.y+bob);
+
+    // cone
+    ctx.fillStyle='#c98a4a';
+    ctx.beginPath();
+    ctx.moveTo(-11,3);
+    ctx.lineTo(11,3);
+    ctx.lineTo(0,27);
+    ctx.closePath();
+    ctx.fill();
+
+    // cone lines
+    ctx.strokeStyle='#8d5f32';
+    ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(-7,7);ctx.lineTo(6,21);
+    ctx.moveTo(7,7);ctx.lineTo(-4,21);
+    ctx.stroke();
+
+    // scoops
+    ctx.fillStyle='#f4a6c1';
+    ctx.beginPath();ctx.arc(-8,-5,10,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#f7e27d';
+    ctx.beginPath();ctx.arc(7,-5,10,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#c58a63';
+    ctx.beginPath();ctx.arc(0,-14,10,0,Math.PI*2);ctx.fill();
+
+    // sparkle
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(20,-18);ctx.lineTo(20,-8);
+    ctx.moveTo(15,-13);ctx.lineTo(25,-13);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
   for(const e of enemies){
     if(!e.alive)continue;
 
@@ -558,37 +624,162 @@ function draw(){
     ctx.fillStyle='#2d8f3a';ctx.beginPath();ctx.moveTo(goal.x+goal.w,goal.y+10);ctx.lineTo(goal.x+88,goal.y+35);ctx.lineTo(goal.x+goal.w,goal.y+60);ctx.closePath();ctx.fill();
   }
 
-  if(boss&&boss.alive){
+  if(boss&&(boss.alive||boss.deadTimer>0)){
     const s=boss.w/120;
+    const dead=!boss.alive;
     ctx.save();
     ctx.translate(boss.x,boss.y);
 
+    // shadow
     ctx.fillStyle='rgba(0,0,0,.22)';
-    ctx.beginPath();ctx.ellipse(boss.w/2,boss.h+5,boss.w*.42,11*s,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(boss.w/2,boss.h+5,boss.w*.42,11*s,0,0,Math.PI*2);
+    ctx.fill();
 
-    ctx.fillStyle=boss.mega?'#4b1738':'#73401f';
-    ctx.beginPath();ctx.ellipse(boss.w/2,boss.h*.66,boss.w*.43,boss.h*.34,0,0,Math.PI*2);ctx.fill();
+    // Each miniboss has a different silhouette.
+    ctx.fillStyle=boss.mega?'#4b1738':['#73401f','#355c8a','#6b3c7a','#47733a','#8a5a2b','#7f3333','#3c6f73'][boss.shape];
 
-    ctx.fillStyle=boss.mega?'#c43c35':'#2f8a3b';
-    ctx.beginPath();ctx.ellipse(boss.w/2,boss.h*.56,boss.w*.46,boss.h*.27,0,0,Math.PI*2);ctx.fill();
-
-    ctx.fillStyle='#eee';
-    const spikes=boss.mega?6:4;
-    for(let i=0;i<spikes;i++){
-      const xx=boss.w*.18+i*(boss.w*.64/(spikes-1));
+    if(boss.mega){
+      // Mega boss: huge rounded monster
       ctx.beginPath();
-      ctx.moveTo(xx-7*s,boss.h*.32);
-      ctx.lineTo(xx,boss.h*.12-(i%2)*8*s);
-      ctx.lineTo(xx+7*s,boss.h*.32);
+      ctx.ellipse(boss.w/2,boss.h*.64,boss.w*.46,boss.h*.36,0,0,Math.PI*2);
+      ctx.fill();
+    } else if(boss.shape===0){
+      // Round
+      ctx.beginPath();
+      ctx.arc(boss.w/2,boss.h*.59,boss.w*.43,0,Math.PI*2);
+      ctx.fill();
+    } else if(boss.shape===1){
+      // Tall / rectangular
+      ctx.beginPath();
+      ctx.roundRect(boss.w*.18,boss.h*.22,boss.w*.64,boss.h*.65,14*s);
+      ctx.fill();
+    } else if(boss.shape===2){
+      // Triangle / pyramid
+      ctx.beginPath();
+      ctx.moveTo(boss.w/2,boss.h*.14);
+      ctx.lineTo(boss.w*.91,boss.h*.88);
+      ctx.lineTo(boss.w*.09,boss.h*.88);
+      ctx.closePath();
+      ctx.fill();
+    } else if(boss.shape===3){
+      // Wide / squat
+      ctx.beginPath();
+      ctx.ellipse(boss.w/2,boss.h*.68,boss.w*.49,boss.h*.27,0,0,Math.PI*2);
+      ctx.fill();
+    } else if(boss.shape===4){
+      // Diamond
+      ctx.beginPath();
+      ctx.moveTo(boss.w/2,boss.h*.08);
+      ctx.lineTo(boss.w*.92,boss.h*.52);
+      ctx.lineTo(boss.w/2,boss.h*.94);
+      ctx.lineTo(boss.w*.08,boss.h*.52);
+      ctx.closePath();
+      ctx.fill();
+    } else if(boss.shape===5){
+      // Two-lobed monster
+      ctx.beginPath();
+      ctx.arc(boss.w*.34,boss.h*.58,boss.w*.29,0,Math.PI*2);
+      ctx.arc(boss.w*.66,boss.h*.58,boss.w*.29,0,Math.PI*2);
+      ctx.fill();
+    } else {
+      // Spiky blob
+      ctx.beginPath();
+      for(let i=0;i<16;i++){
+        const a=(Math.PI*2*i)/16-Math.PI/2;
+        const r=(i%2===0?boss.w*.46:boss.w*.34);
+        const x=boss.w/2+Math.cos(a)*r;
+        const y=boss.h*.58+Math.sin(a)*r*.82;
+        if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
       ctx.fill();
     }
 
-    drawFace(enemyFace,boss.w*.18,boss.h*.02,boss.w*.64,boss.w*.64);
-
-    if(boss.mega){
-      ctx.strokeStyle='#ffd84d';ctx.lineWidth=5;
-      ctx.beginPath();ctx.arc(boss.w/2,boss.h*.35,boss.w*.39+Math.sin(animTime*6)*5,0,Math.PI*2);ctx.stroke();
+    // Colored belly / armor, adapted to shape.
+    if(!dead){
+      ctx.fillStyle=boss.mega?'#c43c35':'rgba(255,255,255,.16)';
+      ctx.beginPath();
+      ctx.ellipse(boss.w/2,boss.h*.65,boss.w*.30,boss.h*.20,0,0,Math.PI*2);
+      ctx.fill();
     }
+
+    // horns/spikes while alive
+    if(!dead){
+      ctx.fillStyle='#eee';
+      const spikes=boss.mega?6:3+(boss.level%3);
+      for(let i=0;i<spikes;i++){
+        const xx=boss.w*.18+i*(boss.w*.64/Math.max(1,spikes-1));
+        ctx.beginPath();
+        ctx.moveTo(xx-7*s,boss.h*.30);
+        ctx.lineTo(xx,boss.h*.10-(i%2)*7*s);
+        ctx.lineTo(xx+7*s,boss.h*.30);
+        ctx.fill();
+      }
+    }
+
+    // Face picture stays, but KO overlays replace the eyes/mouth.
+    drawFace(enemyFace,boss.w*.19,boss.h*.08,boss.w*.62,boss.w*.62);
+
+    if(dead){
+      // pale KO overlay
+      ctx.fillStyle='rgba(255,255,255,.15)';
+      ctx.beginPath();
+      ctx.ellipse(boss.w/2,boss.h*.38,boss.w*.31,boss.h*.25,0,0,Math.PI*2);
+      ctx.fill();
+
+      // crossed eyes
+      ctx.strokeStyle='#111';
+      ctx.lineWidth=Math.max(4,5*s);
+      ctx.lineCap='round';
+      const ey=boss.h*.34;
+      const ex1=boss.w*.39, ex2=boss.w*.61, d=7*s;
+      ctx.beginPath();
+      ctx.moveTo(ex1-d,ey-d);ctx.lineTo(ex1+d,ey+d);
+      ctx.moveTo(ex1+d,ey-d);ctx.lineTo(ex1-d,ey+d);
+      ctx.moveTo(ex2-d,ey-d);ctx.lineTo(ex2+d,ey+d);
+      ctx.moveTo(ex2+d,ey-d);ctx.lineTo(ex2-d,ey+d);
+      ctx.stroke();
+
+      // open mouth
+      ctx.fillStyle='#23120f';
+      ctx.beginPath();
+      ctx.ellipse(boss.w/2,boss.h*.55,boss.w*.13,boss.h*.075,0,0,Math.PI*2);
+      ctx.fill();
+
+      // tongue sticking out
+      ctx.fillStyle='#e86b86';
+      ctx.beginPath();
+      ctx.roundRect(boss.w*.46,boss.h*.55,boss.w*.08,boss.h*.16,6*s);
+      ctx.fill();
+      ctx.strokeStyle='#9f3d55';
+      ctx.lineWidth=2*s;
+      ctx.beginPath();
+      ctx.moveTo(boss.w/2,boss.h*.60);
+      ctx.lineTo(boss.w/2,boss.h*.69);
+      ctx.stroke();
+
+      // little stars circling the KO boss
+      ctx.fillStyle='#ffd84d';
+      for(let i=0;i<3;i++){
+        const a=animTime*3+i*2.1;
+        const sx=boss.w/2+Math.cos(a)*boss.w*.38;
+        const sy=boss.h*.12+Math.sin(a)*boss.h*.08;
+        ctx.save();
+        ctx.translate(sx,sy);
+        ctx.rotate(a);
+        ctx.fillRect(-3*s,-9*s,6*s,18*s);
+        ctx.fillRect(-9*s,-3*s,18*s,6*s);
+        ctx.restore();
+      }
+    } else if(boss.mega){
+      ctx.strokeStyle='#ffd84d';
+      ctx.lineWidth=5;
+      ctx.beginPath();
+      ctx.arc(boss.w/2,boss.h*.35,boss.w*.39+Math.sin(animTime*6)*5,0,Math.PI*2);
+      ctx.stroke();
+    }
+
     ctx.restore();
   }
 
