@@ -34,6 +34,8 @@ button:active,.active{background:#fff5}
   <span id="lifeText">Vite: 3</span>
 </div>
 
+<div id="invHud" style="position:fixed;top:48px;left:14px;z-index:11;display:none;color:#fff;font-weight:900;text-shadow:0 2px 3px #000">INVINCIBILE: <span id="invTime">0.0</span>s</div>
+
 <div id="bossHud">
   BOSS
   <div id="bossBar"><div id="bossFill"></div></div>
@@ -63,6 +65,7 @@ const startBtn=document.getElementById('start');
 const levelText=document.getElementById('levelText'),scoreText=document.getElementById('scoreText');
 const coinText=document.getElementById('coinText'),lifeText=document.getElementById('lifeText');
 const bossHud=document.getElementById('bossHud'),bossFill=document.getElementById('bossFill');
+const invHud=document.getElementById('invHud'),invTime=document.getElementById('invTime');
 
 let W,H,dpr,last=0,running=false,camX=0,animTime=0;
 function resize(){
@@ -81,7 +84,8 @@ enemyFace.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXwAAAF8CAYAAADM5wD
 const keys={left:false,right:false,jump:false};
 const player={x:100,y:0,w:64,h:84,vx:0,vy:0,onGround:false,face:1,invuln:0};
 let score=0,coins=0,lives=3,currentLevel=1;
-let worldW=3600,groundY=0,platforms=[],coinObjs=[],enemies=[],boxes=[],goal=null,boss=null;
+let worldW=3600,groundY=0,platforms=[],coinObjs=[],enemies=[],boxes=[],pastaObjs=[],goal=null,boss=null;
+let pastaInvuln=0,pastaMusic=false;
 let transitionLock=false;
 
 let audioCtx=null,musicTimer=null,musicStep=0;
@@ -101,6 +105,7 @@ function sfxStomp(){tone(180,.1,'square',.05)}
 function sfxHit(){tone(110,.18,'sawtooth',.05)}
 function sfxLevel(){[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.12),i*90))}
 function sfxBossHit(){tone(130,.12,'sawtooth',.06);setTimeout(()=>tone(90,.15,'square',.04),60)}
+function sfxPasta(){[659,784,988,1319].forEach((f,i)=>setTimeout(()=>tone(f,.10,'square',.045),i*70))}
 function sfxWin(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.045),i*120))}
 const themes=[
  [523,659,784,659,587,698,880,698],
@@ -115,6 +120,23 @@ function startMusic(){
   tick();musicTimer=setInterval(tick,currentLevel===4?175:150);
 }
 function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null}}
+function startPastaMusic(){
+  stopMusic();musicStep=0;pastaMusic=true;
+  const seq=[784,988,1175,1319,1175,988,1568,1319,988,1175,1319,1760];
+  const tick=()=>{
+    if(!running||pastaInvuln<=0)return;
+    const n=seq[musicStep%seq.length];
+    tone(n,.085,'square',.016);
+    if(musicStep%2===0)tone(n/2,.09,'triangle',.010);
+    musicStep++;
+  };
+  tick();musicTimer=setInterval(tick,105);
+}
+function restoreLevelMusic(){
+  if(!running)return;
+  pastaMusic=false;
+  startMusic();
+}
 
 function rectHit(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
 function addGround(arr,x,w){arr.push({x,y:groundY,w,h:140})}
@@ -128,7 +150,8 @@ function setHud(){
 }
 
 function buildLevel(n,resetPlayer=true){
-  groundY=H-112; platforms=[];coinObjs=[];enemies=[];boxes=[];goal=null;boss=null;
+  groundY=H-112; platforms=[];coinObjs=[];enemies=[];boxes=[];pastaObjs=[];goal=null;boss=null;
+  pastaInvuln=0;pastaMusic=false;invHud.style.display='none';
   bossHud.style.display='none';
   worldW=n===4?4000:3600;
 
@@ -137,22 +160,26 @@ function buildLevel(n,resetPlayer=true){
     platforms.push({x:420,y:groundY-120,w:160,h:22},{x:930,y:groundY-155,w:180,h:22},{x:1460,y:groundY-115,w:160,h:22},{x:2100,y:groundY-150,w:190,h:22},{x:2740,y:groundY-120,w:200,h:22});
     enemies=[mkEnemy(600,-45),mkEnemy(1030,-50),mkEnemy(1580,45),mkEnemy(2260,-52),mkEnemy(2860,-55)];
     coinObjs=[mkCoin(470,groundY-170),mkCoin(530,groundY-235),mkCoin(970,groundY-205),mkCoin(1510,groundY-165),mkCoin(2150,groundY-200),mkCoin(2790,groundY-170),mkCoin(3270,groundY-75)];
+    pastaObjs=[{x:1760,y:groundY-55,r:22,taken:false}];
   } else if(n===2){
     addGround(platforms,0,480);addGround(platforms,600,360);addGround(platforms,1080,300);addGround(platforms,1510,420);addGround(platforms,2050,340);addGround(platforms,2510,460);addGround(platforms,3110,490);
     platforms.push({x:330,y:groundY-130,w:120,h:20},{x:700,y:groundY-200,w:140,h:20},{x:1160,y:groundY-120,w:130,h:20},{x:1600,y:groundY-185,w:180,h:20},{x:2160,y:groundY-125,w:150,h:20},{x:2630,y:groundY-200,w:180,h:20},{x:3220,y:groundY-150,w:160,h:20});
     enemies=[mkEnemy(420,-65),mkEnemy(790,60),mkEnemy(1210,-65),mkEnemy(1700,-70),mkEnemy(2240,65),mkEnemy(2730,-70),mkEnemy(3300,-65)];
     coinObjs=[mkCoin(370,groundY-180),mkCoin(730,groundY-250),mkCoin(800,groundY-250),mkCoin(1215,groundY-170),mkCoin(1660,groundY-235),mkCoin(2200,groundY-175),mkCoin(2680,groundY-250),mkCoin(3260,groundY-200),mkCoin(3420,groundY-90)];
+    pastaObjs=[{x:1880,y:groundY-55,r:22,taken:false}];
   } else if(n===3){
     addGround(platforms,0,400);addGround(platforms,530,320);addGround(platforms,1000,360);addGround(platforms,1530,300);addGround(platforms,1980,370);addGround(platforms,2510,330);addGround(platforms,3000,600);
     platforms.push({x:270,y:groundY-170,w:120,h:20},{x:610,y:groundY-250,w:130,h:20},{x:1060,y:groundY-190,w:140,h:20},{x:1580,y:groundY-260,w:150,h:20},{x:2030,y:groundY-185,w:170,h:20},{x:2560,y:groundY-255,w:150,h:20},{x:3070,y:groundY-190,w:170,h:20});
     enemies=[mkEnemy(340,-75),mkEnemy(650,72),mkEnemy(1110,-78),mkEnemy(1640,75),mkEnemy(2110,-80),mkEnemy(2620,78),mkEnemy(3190,-80),mkEnemy(3380,75)];
     coinObjs=[mkCoin(310,groundY-220),mkCoin(650,groundY-300),mkCoin(715,groundY-300),mkCoin(1100,groundY-240),mkCoin(1630,groundY-310),mkCoin(2090,groundY-235),mkCoin(2600,groundY-305),mkCoin(3120,groundY-240),mkCoin(3300,groundY-95)];
+    pastaObjs=[{x:2320,y:groundY-55,r:22,taken:false}];
   } else {
     // Livello boss: tratto iniziale + arena finale
     addGround(platforms,0,950);addGround(platforms,1070,620);addGround(platforms,1800,600);addGround(platforms,2550,1450);
     platforms.push({x:620,y:groundY-150,w:170,h:20},{x:1320,y:groundY-180,w:180,h:20},{x:2050,y:groundY-150,w:180,h:20});
     enemies=[mkEnemy(620,-70),mkEnemy(1450,-75),mkEnemy(2190,-80)];
     coinObjs=[mkCoin(660,groundY-200),mkCoin(1380,groundY-230),mkCoin(2110,groundY-200),mkCoin(2700,groundY-100)];
+    pastaObjs=[{x:2920,y:groundY-55,r:22,taken:false}];
     boss={x:3300,y:groundY-120,w:120,h:120,vx:-80,hp:5,maxHp:5,alive:true,hitCooldown:0};
     bossHud.style.display='block';bossFill.style.width='100%';
   }
@@ -173,7 +200,7 @@ function respawn(){
 }
 
 function loseLife(){
-  if(player.invuln>0||transitionLock)return;
+  if(player.invuln>0||pastaInvuln>0||transitionLock)return;
   sfxHit();lives--;setHud();
   if(lives<=0){
     running=false;stopMusic();bossHud.style.display='none';overlay.style.display='flex';
@@ -201,6 +228,15 @@ function winGame(){
 function update(dt){
   animTime += dt;
   if(player.invuln>0)player.invuln-=dt;
+  if(pastaInvuln>0){
+    pastaInvuln=Math.max(0,pastaInvuln-dt);
+    invHud.style.display='block';
+    invTime.textContent=pastaInvuln.toFixed(1);
+    if(pastaInvuln<=0){
+      invHud.style.display='none';
+      if(pastaMusic)restoreLevelMusic();
+    }
+  }
   if(boss&&boss.hitCooldown>0)boss.hitCooldown-=dt;
   const oldY=player.y;
 
@@ -235,7 +271,11 @@ function update(dt){
     if(!support)e.vx*=-1;
     if(rectHit(player,e)){
       const stomp=player.vy>0&&oldY+player.h<=e.y+14;
-      if(stomp){e.alive=false;player.vy=-340;score+=200;sfxStomp();setHud()}else loseLife();
+      if(pastaInvuln>0){
+        e.alive=false;score+=250;sfxStomp();setHud();
+      } else if(stomp){
+        e.alive=false;player.vy=-340;score+=200;sfxStomp();setHud();
+      } else loseLife();
     }
   }
 
@@ -244,6 +284,23 @@ function update(dt){
     const cx=Math.max(player.x,Math.min(co.x,player.x+player.w));
     const cy=Math.max(player.y,Math.min(co.y,player.y+player.h));
     if(Math.hypot(co.x-cx,co.y-cy)<co.r+5){co.taken=true;coins++;score+=50;sfxCoin();setHud()}
+  }
+
+  // Un piatto di pasta per livello: 7 secondi di invincibilità
+  for(const p of pastaObjs){
+    if(p.taken)continue;
+    const cx=Math.max(player.x,Math.min(p.x,player.x+player.w));
+    const cy=Math.max(player.y,Math.min(p.y,player.y+player.h));
+    if(Math.hypot(p.x-cx,p.y-cy)<p.r+8){
+      p.taken=true;
+      pastaInvuln=7;
+      score+=300;
+      sfxPasta();
+      startPastaMusic();
+      invHud.style.display='block';
+      invTime.textContent='7.0';
+      setHud();
+    }
   }
 
   if(goal&&player.x+player.w>goal.x)nextLevel();
@@ -298,6 +355,31 @@ function draw(){
   for(const co of coinObjs){
     if(co.taken)continue;ctx.fillStyle='#ffd43b';ctx.beginPath();ctx.ellipse(co.x,co.y,7,12,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#b57e00';ctx.stroke();
   }
+
+  // Piatto di pasta
+  for(const p of pastaObjs){
+    if(p.taken)continue;
+    ctx.save();
+    const bob=Math.sin(animTime*4+p.x*.01)*3;
+    ctx.translate(p.x,p.y+bob);
+    // piatto
+    ctx.fillStyle='#f5f5f5';
+    ctx.beginPath();ctx.ellipse(0,8,25,9,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#bbb';ctx.lineWidth=2;ctx.stroke();
+    // spaghetti
+    ctx.strokeStyle='#f0c84b';ctx.lineWidth=4;ctx.lineCap='round';
+    for(let i=-14;i<=14;i+=7){
+      ctx.beginPath();
+      ctx.moveTo(i,3);
+      ctx.bezierCurveTo(i+8,-8,i-8,-12,i+2,-18);
+      ctx.stroke();
+    }
+    // salsa
+    ctx.fillStyle='#d94b3d';
+    ctx.beginPath();ctx.arc(-4,-8,4,0,Math.PI*2);ctx.arc(5,-10,4,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+
   for(const e of enemies){
     if(!e.alive)continue;
 
@@ -355,29 +437,65 @@ function draw(){
   const heroLeg=heroPhase*9;
   const heroArm=-heroPhase*8;
 
-  // torso
-  ctx.fillStyle='#d94335';
-  ctx.fillRect(player.x+14,player.y+49,36,16);
-  ctx.fillStyle='#2c63d8';
-  ctx.fillRect(player.x+14,player.y+61,36,18);
+  // torso: diventa più largo e muscoloso con la pasta
+  if(pastaInvuln>0){
+    ctx.fillStyle='#d94335';
+    ctx.beginPath();
+    ctx.roundRect(player.x+7,player.y+46,50,25,8);
+    ctx.fill();
+    ctx.fillStyle='#2c63d8';
+    ctx.fillRect(player.x+13,player.y+65,38,16);
 
-  // arms
-  ctx.strokeStyle='#d94335';
-  ctx.lineWidth=8;
-  ctx.lineCap='round';
-  ctx.beginPath();
-  ctx.moveTo(player.x+16,player.y+55);
-  ctx.lineTo(player.x+6,player.y+66+heroArm);
-  ctx.moveTo(player.x+48,player.y+55);
-  ctx.lineTo(player.x+58,player.y+66-heroArm);
-  ctx.stroke();
+    // braccia piegate in posa da culturista
+    ctx.strokeStyle='#d94335';
+    ctx.lineWidth=10;
+    ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(player.x+12,player.y+53);
+    ctx.lineTo(player.x+1,player.y+61);
+    ctx.lineTo(player.x+7,player.y+45);
+    ctx.moveTo(player.x+52,player.y+53);
+    ctx.lineTo(player.x+63,player.y+61);
+    ctx.lineTo(player.x+57,player.y+45);
+    ctx.stroke();
 
-  // white gloves
-  ctx.fillStyle='#fff';
-  ctx.beginPath();
-  ctx.arc(player.x+6,player.y+66+heroArm,5,0,Math.PI*2);
-  ctx.arc(player.x+58,player.y+66-heroArm,5,0,Math.PI*2);
-  ctx.fill();
+    // bicipiti
+    ctx.fillStyle='#d94335';
+    ctx.beginPath();
+    ctx.arc(player.x+3,player.y+57,9,0,Math.PI*2);
+    ctx.arc(player.x+61,player.y+57,9,0,Math.PI*2);
+    ctx.fill();
+
+    // guanti
+    ctx.fillStyle='#fff';
+    ctx.beginPath();
+    ctx.arc(player.x+7,player.y+43,6,0,Math.PI*2);
+    ctx.arc(player.x+57,player.y+43,6,0,Math.PI*2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle='#d94335';
+    ctx.fillRect(player.x+14,player.y+49,36,16);
+    ctx.fillStyle='#2c63d8';
+    ctx.fillRect(player.x+14,player.y+61,36,18);
+
+    // arms
+    ctx.strokeStyle='#d94335';
+    ctx.lineWidth=8;
+    ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(player.x+16,player.y+55);
+    ctx.lineTo(player.x+6,player.y+66+heroArm);
+    ctx.moveTo(player.x+48,player.y+55);
+    ctx.lineTo(player.x+58,player.y+66-heroArm);
+    ctx.stroke();
+
+    // white gloves
+    ctx.fillStyle='#fff';
+    ctx.beginPath();
+    ctx.arc(player.x+6,player.y+66+heroArm,5,0,Math.PI*2);
+    ctx.arc(player.x+58,player.y+66-heroArm,5,0,Math.PI*2);
+    ctx.fill();
+  }
 
   // legs
   ctx.strokeStyle='#2c63d8';
