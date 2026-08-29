@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Michael Bros - 4 Livelli</title>
+<title>MichaelBros - 4 Livelli</title>
 <style>
 html,body{margin:0;padding:0;overflow:hidden;background:#69bff5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;touch-action:none}
 canvas{display:block;width:100vw;height:100vh;background:#69bff5}
@@ -49,7 +49,7 @@ button:active,.active{background:#fff5}
 
 <div id="overlay">
   <div class="panel">
-    <h1 id="title">MICHAEL BROS</h1>
+    <h1 id="title">MichaelBros</h1>
     <p id="message">Quattro livelli. Nell'ultimo ti aspetta il boss finale: saltaci sopra più volte per sconfiggerlo!</p>
     <button id="start">GIOCA</button>
   </div>
@@ -64,7 +64,7 @@ const levelText=document.getElementById('levelText'),scoreText=document.getEleme
 const coinText=document.getElementById('coinText'),lifeText=document.getElementById('lifeText');
 const bossHud=document.getElementById('bossHud'),bossFill=document.getElementById('bossFill');
 
-let W,H,dpr,last=0,running=false,camX=0;
+let W,H,dpr,last=0,running=false,camX=0,animTime=0;
 function resize(){
   dpr=Math.max(1,Math.min(2,devicePixelRatio||1));W=innerWidth;H=innerHeight;
   canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';
@@ -199,6 +199,7 @@ function winGame(){
 }
 
 function update(dt){
+  animTime += dt;
   if(player.invuln>0)player.invuln-=dt;
   if(boss&&boss.hitCooldown>0)boss.hitCooldown-=dt;
   const oldY=player.y;
@@ -299,7 +300,37 @@ function draw(){
   }
   for(const e of enemies){
     if(!e.alive)continue;
-    ctx.fillStyle='#713d23';ctx.fillRect(e.x+8,e.y+33,e.w-16,18);
+
+    const moving=Math.abs(e.vx)>5;
+    const phase=moving ? Math.sin(animTime*10 + e.x*.03) : 0;
+    const legSwing=phase*7;
+    const armSwing=-phase*5;
+
+    // body
+    ctx.fillStyle='#713d23';
+    ctx.fillRect(e.x+11,e.y+30,e.w-22,18);
+
+    // animated arms
+    ctx.strokeStyle='#713d23';
+    ctx.lineWidth=7;
+    ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(e.x+13,e.y+34);
+    ctx.lineTo(e.x+5,e.y+41+armSwing);
+    ctx.moveTo(e.x+e.w-13,e.y+34);
+    ctx.lineTo(e.x+e.w-5,e.y+41-armSwing);
+    ctx.stroke();
+
+    // animated legs
+    ctx.strokeStyle='#3b2417';
+    ctx.lineWidth=8;
+    ctx.beginPath();
+    ctx.moveTo(e.x+19,e.y+46);
+    ctx.lineTo(e.x+16-legSwing,e.y+55);
+    ctx.moveTo(e.x+e.w-19,e.y+46);
+    ctx.lineTo(e.x+e.w-16+legSwing,e.y+55);
+    ctx.stroke();
+
     drawFace(enemyFace,e.x+2,e.y,48,48);
   }
   if(goal){
@@ -318,11 +349,55 @@ function draw(){
     drawFace(enemyFace,boss.x+22,boss.y-4,76,76);
   }
 
-  // protagonista
-  ctx.fillStyle='#d94335';ctx.fillRect(player.x+12,player.y+50,40,15);
-  ctx.fillStyle='#2c63d8';ctx.fillRect(player.x+10,player.y+62,44,20);
-  ctx.fillStyle='#6b3e1e';ctx.fillRect(player.x+5,player.y+79,18,5);ctx.fillRect(player.x+41,player.y+79,18,5);
-  if(player.invuln<=0||Math.floor(player.invuln*10)%2===0)drawFace(heroFace,player.x,player.y-2,64,64);
+  // protagonista con braccia e gambe animate
+  const heroMoving=Math.abs(player.vx)>12 && player.onGround;
+  const heroPhase=heroMoving ? Math.sin(animTime*12) : 0;
+  const heroLeg=heroPhase*9;
+  const heroArm=-heroPhase*8;
+
+  // torso
+  ctx.fillStyle='#d94335';
+  ctx.fillRect(player.x+14,player.y+49,36,16);
+  ctx.fillStyle='#2c63d8';
+  ctx.fillRect(player.x+14,player.y+61,36,18);
+
+  // arms
+  ctx.strokeStyle='#d94335';
+  ctx.lineWidth=8;
+  ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(player.x+16,player.y+55);
+  ctx.lineTo(player.x+6,player.y+66+heroArm);
+  ctx.moveTo(player.x+48,player.y+55);
+  ctx.lineTo(player.x+58,player.y+66-heroArm);
+  ctx.stroke();
+
+  // white gloves
+  ctx.fillStyle='#fff';
+  ctx.beginPath();
+  ctx.arc(player.x+6,player.y+66+heroArm,5,0,Math.PI*2);
+  ctx.arc(player.x+58,player.y+66-heroArm,5,0,Math.PI*2);
+  ctx.fill();
+
+  // legs
+  ctx.strokeStyle='#2c63d8';
+  ctx.lineWidth=9;
+  ctx.beginPath();
+  ctx.moveTo(player.x+24,player.y+76);
+  ctx.lineTo(player.x+20-heroLeg,player.y+87);
+  ctx.moveTo(player.x+40,player.y+76);
+  ctx.lineTo(player.x+44+heroLeg,player.y+87);
+  ctx.stroke();
+
+  // shoes
+  ctx.fillStyle='#6b3e1e';
+  ctx.beginPath();
+  ctx.ellipse(player.x+18-heroLeg,player.y+88,9,4,0,0,Math.PI*2);
+  ctx.ellipse(player.x+46+heroLeg,player.y+88,9,4,0,0,Math.PI*2);
+  ctx.fill();
+
+  if(player.invuln<=0||Math.floor(player.invuln*10)%2===0)
+    drawFace(heroFace,player.x,player.y-2,64,64);
   ctx.restore();
 }
 
