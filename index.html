@@ -167,6 +167,63 @@ function sfxLevel(){[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.12)
 function sfxBossHit(){tone(130,.12,'sawtooth',.06);setTimeout(()=>tone(90,.15,'square',.04),60)}
 function sfxPasta(){[659,784,988,1319].forEach((f,i)=>setTimeout(()=>tone(f,.10,'square',.045),i*70))}
 function sfxBurger(){[440,660,880,1100].forEach((f,i)=>setTimeout(()=>tone(f,.07,'square',.04),i*45))}
+
+
+function getGameVoice(){
+  if(!('speechSynthesis' in window)) return null;
+  const voices=speechSynthesis.getVoices()||[];
+  const preferred=[
+    'Daniel','Alex','Arthur','Fred','Ralph','Tom','Aaron',
+    'Reed','Rocko','Eddy','Grandpa','Albert'
+  ];
+  for(const name of preferred){
+    const v=voices.find(x=>x.name && x.name.toLowerCase().includes(name.toLowerCase()));
+    if(v)return v;
+  }
+  // Prefer an English voice; avoid several commonly female Apple voice names.
+  const avoid=['samantha','victoria','karen','moira','tessa','fiona','serena','ava'];
+  return voices.find(v=>{
+    const n=(v.name||'').toLowerCase();
+    return /^en[-_]/i.test(v.lang||'') && !avoid.some(a=>n.includes(a));
+  }) || voices.find(v=>/^en[-_]/i.test(v.lang||'')) || voices[0] || null;
+}
+function speakGame(text,rate,pitch){
+  try{
+    if(!('speechSynthesis' in window))return false;
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    const v=getGameVoice();
+    if(v)u.voice=v;
+    u.lang=(v&&v.lang)||'en-US';
+    u.rate=rate;
+    u.pitch=pitch;
+    u.volume=1;
+    speechSynthesis.speak(u);
+    return true;
+  }catch(e){return false;}
+}
+
+function sayOhNo(){
+  if(!speakGame('Oh no!',1.18,1.22)){
+    tone(392,.08,'square',.03);setTimeout(()=>tone(247,.18,'triangle',.03),90);
+  }
+}
+
+function sayYes(){
+  if(!speakGame('Yes!',1.22,1.28)){
+    tone(523,.07,'square',.03);setTimeout(()=>tone(880,.15,'triangle',.035),70);
+  }
+}
+
+function sayYumYum(){
+  if(!speakGame('Yum yum!',1.12,1.24)){
+    tone(587,.07,'square',.03);setTimeout(()=>tone(784,.10,'triangle',.035),75);
+    setTimeout(()=>tone(659,.07,'square',.03),165);setTimeout(()=>tone(880,.11,'triangle',.035),235);
+  }
+}
+
+
+
 function sfxIceCream(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.09,'square',.05),i*65))}
 function sfxWin(){[523,659,784,1047,1319].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.045),i*120))}
 
@@ -320,35 +377,47 @@ function startMusic(){
 }
 function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null}}
 function startPastaMusic(){
-  stopMusic();musicStep=0;pastaMusic=true;
+  stopMusic(); musicStep=0; pastaMusic=true;
+  createAudio();
 
-  const lead=[659,0,784,988,0,1047,988,784, 880,0,988,1175,0,1319,1175,988];
-  const bass=[131,0,165,0,196,0,175,0];
+  // Il Canto degli Italiani: louder, cleaner ceremonial game arrangement.
+  // Melody is deliberately dominant over accompaniment.
+  const melody=[
+    523,523,523,659,659,659,784,784,
+    880,784,698,659,587,659,523,0,
+    523,523,523,659,659,659,784,784,
+    880,784,698,659,784,659,523,0,
+    659,659,698,784,880,880,784,698,
+    659,587,659,698,784,659,587,523
+  ];
+  const bass=[131,0,131,0,196,0,165,0];
 
   const tick=()=>{
-    if(!running||pastaInvuln<=0)return;
-    const s=musicStep, beat=s%16;
-    const n=lead[beat];
+    if(!running || pastaInvuln<=0) return;
+    const s=musicStep;
+    const n=melody[s%melody.length];
 
-    if(n) tone(n,.16,'square',.024);
-    if(beat===2||beat===6||beat===10||beat===14){
-      setTimeout(()=>tone(330,.12,'triangle',.010),20);
-      setTimeout(()=>tone(415,.12,'triangle',.009),35);
-      setTimeout(()=>tone(494,.12,'triangle',.008),50);
+    // Main anthem melody
+    if(n){
+      tone(n,.245,'square',.050);
+      // softer octave adds an Amiga-like fuller sound
+      tone(n/2,.255,'triangle',.016);
     }
 
+    // March bass
     const b=bass[s%8];
-    if(b) tone(b,.22,'sawtooth',.016);
+    if(b) tone(b,.34,'sawtooth',.018);
 
-    if(beat===0||beat===8) tone(78,.06,'sine',.020);
-    if(beat===4||beat===12) tone(170,.04,'square',.010);
-    if(beat%2===1) tone(1100,.016,'square',.004);
+    // restrained marching percussion
+    if(s%4===0) tone(72,.055,'sine',.018);
+    if(s%4===2) tone(150,.035,'square',.007);
 
     musicStep++;
   };
 
+  // Start immediately when the pasta is collected.
   tick();
-  musicTimer=setInterval(tick,255);
+  musicTimer=setInterval(tick,285);
 }
 function restoreLevelMusic(){
   if(!running)return;
@@ -445,7 +514,7 @@ function respawn(){
 
 function loseLife(){
   if(player.invuln>0||pastaInvuln>0||transitionLock)return;
-  sfxHit();lives--;setHud();
+  sfxHit();lives--; sayOhNo();setHud();
   if(lives<=0){
     running=false;stopMusic();bossHud.style.display='none';overlay.style.display='flex';
     titleEl.textContent='GAME OVER';messageEl.textContent='Punteggio: '+score+' • Livello raggiunto: '+currentLevel;
@@ -533,6 +602,33 @@ function updateVictoryCutscene(dt){
   cutsceneFireworks=cutsceneFireworks.filter(p=>p.life>0);
 
   if(cutsceneTime>=10.5) winGame();
+}
+
+
+function drawItalianMoustache(cx,cy,w){
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.fillStyle='#2b1a12';
+  ctx.strokeStyle='#120b08';
+  ctx.lineWidth=Math.max(1,w*.035);
+
+  // Left half
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.bezierCurveTo(-w*.10,-w*.10,-w*.28,-w*.10,-w*.43,-w*.01);
+  ctx.bezierCurveTo(-w*.32,w*.02,-w*.20,w*.12,0,w*.055);
+  ctx.closePath();
+  ctx.fill();ctx.stroke();
+
+  // Right half
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.bezierCurveTo(w*.10,-w*.10,w*.28,-w*.10,w*.43,-w*.01);
+  ctx.bezierCurveTo(w*.32,w*.02,w*.20,w*.12,0,w*.055);
+  ctx.closePath();
+  ctx.fill();ctx.stroke();
+
+  ctx.restore();
 }
 
 function drawPrincess(x,y,scale=1){
@@ -744,6 +840,9 @@ function drawVictoryCutscene(){
 }
 
 function update(dt){
+  for(const e of enemies){
+    if(e.squashedTimer>0) e.squashedTimer=Math.max(0,e.squashedTimer-dt);
+  }
   animTime += dt;
   if(cutsceneActive){updateVictoryCutscene(dt);return;}
   if(player.invuln>0)player.invuln-=dt;
@@ -793,16 +892,17 @@ function update(dt){
   if(player.y>H+250)loseLife();
 
   for(const e of enemies){
-    if(!e.alive)continue;e.x+=e.vx*dt;
+    if(e.squashedTimer>0) continue;
+    if(!e.alive && e.squashedTimer<=0)continue;e.x+=e.vx*dt;
     let support=false;
     for(const p of platforms)if(e.x+e.w/2>p.x&&e.x+e.w/2<p.x+p.w&&Math.abs(e.y+e.h-p.y)<10)support=true;
     if(!support)e.vx*=-1;
     if(rectHit(player,e)){
       const stomp=player.vy>0&&oldY+player.h<=e.y+14;
       if(pastaInvuln>0){
-        e.alive=false;score+=250;sfxStomp();setHud();
+        e.alive=false; e.squashedTimer=2.0;score+=250;sfxStomp();setHud();
       } else if(stomp){
-        e.alive=false;player.vy=-340;score+=200;sfxStomp();setHud();
+        e.alive=false; e.squashedTimer=2.0;player.vy=-340;score+=200;sfxStomp();setHud();
       } else loseLife();
     }
   }
@@ -837,7 +937,7 @@ function update(dt){
     const cx=Math.max(player.x,Math.min(b.x,player.x+player.w));
     const cy=Math.max(player.y,Math.min(b.y,player.y+player.h));
     if(Math.hypot(b.x-cx,b.y-cy)<b.r+8){
-      b.taken=true;
+      b.taken=true; sayYes();
       speedBoost=7;
       score+=300;
       sfxBurger();
@@ -856,7 +956,7 @@ function update(dt){
       ic.taken=true;
       lives++;
       score+=500;
-      sfxIceCream();
+      sayYumYum(); sfxIceCream();
       setHud();
     }
   }
@@ -1017,7 +1117,49 @@ function draw(){
   }
 
   for(const e of enemies){
-    if(!e.alive)continue;
+    if(!e.alive && !(e.squashedTimer>0)) continue;
+
+    // For two seconds after being stomped, draw only the flattened body.
+    if(e.squashedTimer>0){
+      const squashH=15;
+      const sx=e.x+e.w/2;
+      const sy=e.y+e.h-squashH/2;
+
+      ctx.save();
+
+      // flattened shadow/body
+      ctx.fillStyle='#5a2f20';
+      ctx.beginPath();
+      ctx.ellipse(sx,sy+5,e.w*.50,squashH*.48,0,0,Math.PI*2);
+      ctx.fill();
+
+      // flattened enemy face
+      drawFace(enemyFace,e.x+4,e.y+e.h-18,e.w-8,16);
+
+      // X eyes, deliberately visible over the photo
+      ctx.strokeStyle='#111';
+      ctx.lineWidth=3;
+      const eyeY=e.y+e.h-12;
+      for(const eyeX of [e.x+e.w*.35,e.x+e.w*.65]){
+        ctx.beginPath();
+        ctx.moveTo(eyeX-4,eyeY-4); ctx.lineTo(eyeX+4,eyeY+4);
+        ctx.moveTo(eyeX+4,eyeY-4); ctx.lineTo(eyeX-4,eyeY+4);
+        ctx.stroke();
+      }
+
+      // tiny "squash" bounce during the first instant
+      if(e.squashedTimer>1.65){
+        ctx.strokeStyle='rgba(255,255,255,.8)';
+        ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.moveTo(sx-22,sy-18);ctx.lineTo(sx-30,sy-26);
+        ctx.moveTo(sx+22,sy-18);ctx.lineTo(sx+30,sy-26);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+      continue;
+    }
 
     const moving=Math.abs(e.vx)>5;
     const phase=moving ? Math.sin(animTime*10 + e.x*.03) : 0;
@@ -1300,6 +1442,7 @@ function draw(){
 
   if(player.invuln<=0||Math.floor(player.invuln*10)%2===0)
     drawFace(heroFace,player.x,player.y-2,64,64);
+    if(pastaInvuln>0) drawItalianMoustache((player.x)+(64)*.5,(player.y-2)+(64)*.67,(64)*.72);
   ctx.restore();
 }
 
@@ -1370,6 +1513,13 @@ if(createAudio()){
 hold('left','left');hold('right','right');hold('jump','jump');
 addEventListener('keydown',e=>{if(e.code==='ArrowLeft')keys.left=true;if(e.code==='ArrowRight')keys.right=true;if(e.code==='Space'||e.code==='ArrowUp')keys.jump=true});
 addEventListener('keyup',e=>{if(e.code==='ArrowLeft')keys.left=false;if(e.code==='ArrowRight')keys.right=false;if(e.code==='Space'||e.code==='ArrowUp')keys.jump=false});
+
+try{
+  if('speechSynthesis' in window){
+    speechSynthesis.getVoices();
+    speechSynthesis.onvoiceschanged=()=>speechSynthesis.getVoices();
+  }
+}catch(e){}
 </script>
 </body>
 </html>
